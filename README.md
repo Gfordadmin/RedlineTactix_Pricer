@@ -42,3 +42,12 @@ Open an issue in the repo describing what the pricer should do — what it
 prices, what inputs it takes, what the output looks like — tag `@claude`,
 and it will propose the change as a pull request. Review, merge, and
 Cloudflare deploys it.
+
+## The pricer
+
+Single-page app served by the Worker (`src/index.js`). Two modes on one shared cost engine (`src/engine.client.js`):
+
+- **Commercial (default):** line items (labor / material / ODC / subcontract), fringe, overhead, material handling, G&A, profit (markup or margin), multiyear escalation, competitive sliders, delivery what-if, internal + submission views.
+- **Federal (optional layer):** adds CLINs / sub-CLINs, WBS, BOE, FCCOM, unallowable flag, and a PWS/SOW/SOO importer. Switching modes never alters stored data.
+
+Data is stored in the browser (localStorage); use Export/Import JSON to move it. `npm test` runs the engine tests, `npm run dev` runs locally. `/api/hello` is unchanged.

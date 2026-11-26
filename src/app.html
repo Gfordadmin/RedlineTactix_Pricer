@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redline Tactix Pricer</title>
+<style>
+:root{--red:#b3261e;--ink:#1d2530;--mut:#5d6877;--line:#d9dee5;--bg:#f5f6f8;--ok:#1b7a3d}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 system-ui,sans-serif;color:var(--ink);background:var(--bg)}
+header{background:#fff;border-bottom:3px solid var(--red);padding:10px 16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+header h1{font-size:18px;margin:0 12px 0 0}header h1 span{color:var(--red)}
+main{max-width:1280px;margin:0 auto;padding:12px 16px 60px}
+button,select,input,textarea{font:inherit}
+button{border:1px solid var(--line);background:#fff;border-radius:6px;padding:5px 10px;cursor:pointer}
+button:hover{border-color:var(--red)}button.pri{background:var(--red);color:#fff;border-color:var(--red)}
+button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+input,select,textarea{border:1px solid var(--line);border-radius:5px;padding:4px 6px;background:#fff;max-width:100%}
+input[type=number]{width:90px}textarea{width:100%}
+.seg{display:inline-flex}.seg button{border-radius:0}.seg button:first-child{border-radius:6px 0 0 6px}.seg button:last-child{border-radius:0 6px 6px 0}
+.kpis{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 14px;min-width:130px}
+.kpi b{display:block;font-size:19px}.kpi small{color:var(--mut)}
+nav{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--line);margin-bottom:12px}
+nav button{border:none;border-bottom:3px solid transparent;border-radius:0;background:none;padding:8px 12px}
+nav button.on{border-bottom-color:var(--red);font-weight:600;background:none;color:var(--ink)}
+.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:12px}
+.card h3{margin:0 0 8px;font-size:15px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+label.f{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--mut)}
+label.f input,label.f select{color:var(--ink);font-size:14px}
+table{border-collapse:collapse;width:100%;background:#fff}
+th,td{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left;vertical-align:top}
+th{font-size:12px;color:var(--mut);background:#fafbfc;white-space:nowrap}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.tot td{font-weight:700;background:#fafbfc}tr.sub td{color:var(--mut)}tr.hi td{background:#fdf0ef;font-weight:600}
+.scroll{overflow-x:auto}.mut{color:var(--mut)}.pos{color:var(--ok)}.neg{color:var(--red)}
+.warn{background:#fff7e0;border:1px solid #f0d98a;border-radius:6px;padding:6px 10px;margin:6px 0}
+.banner{background:var(--red);color:#fff;padding:6px 12px;border-radius:6px;font-weight:600;margin-bottom:10px}
+.line td input[type=text]{width:100%;min-width:90px}.line td input[type=number]{width:84px}
+.fed{background:#fbf5f5}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.tag{font-size:11px;background:#eee;border-radius:10px;padding:1px 8px;margin-left:6px}
+@media print{header,nav,.kpis,.noprint{display:none!important}body{background:#fff}.card{border:none;padding:0}}
+</style>
+</head>
+<body>
+<header>
+<h1><span>Redline</span> Tactix Pricer</h1>
+<select id="psel" title="Proposal"></select>
+<button id="pnew">New</button><button id="psample">Sample</button><button id="pdup">Duplicate</button><button id="pdel">Delete</button>
+<span class="seg" title="Commercial is the default. Federal adds CLINs, WBS, BOE, FCCOM on the same data.">
+<button id="m-commercial">Commercial</button><button id="m-federal">Federal</button></span>
+<span style="flex:1"></span>
+<button id="pexp">Export JSON</button><button id="pimp">Import JSON</button><input id="pfile" type="file" accept=".json" hidden>
+</header>
+<main>
+<div class="kpis" id="kpis"></div>
+<nav id="tabs"></nav>
+<div id="view"></div>
+<p class="mut noprint">Data is stored only in this browser (localStorage). Use Export JSON to back up or share. This tool supports GAAP-consistent cost treatment but is not an accounting or DCAA audit certification.</p>
+</main>
+<script src="/engine.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

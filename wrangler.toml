@@ -1,3 +1,9 @@
 name = "redline-tactix-pricer"
 main = "src/index.js"
 compatibility_date = "2026-11-24"
+
+# Browser assets are bundled into the Worker as text and served by src/index.js.
+[[rules]]
+type = "Text"
+globs = ["**/*.client.js", "**/*.html"]
+fallthrough = false
