@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redline Tactix Pricer</title>
+<style>
+:root{--red:#b3202a;--ink:#1d2330;--mut:#667085;--line:#d9dde5;--bg:#f5f6f9;--ok:#1a7f4b;--warn:#b7791f;--bad:#b3202a}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 system-ui,sans-serif;color:var(--ink);background:var(--bg)}
+header{background:#fff;border-bottom:3px solid var(--red);padding:10px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:5}
+header h1{font-size:18px;margin:0}
+header h1 span{color:var(--red)}
+#kpis{display:flex;gap:18px;flex-wrap:wrap;margin-left:auto}
+.kpi{text-align:right}.kpi b{display:block;font-size:16px}.kpi small{color:var(--mut)}
+nav{background:#fff;border-bottom:1px solid var(--line);padding:0 20px;display:flex;gap:2px;flex-wrap:wrap}
+nav button{border:0;background:none;padding:10px 14px;cursor:pointer;font:inherit;color:var(--mut);border-bottom:3px solid transparent}
+nav button.on{color:var(--red);border-color:var(--red);font-weight:600}
+main{padding:18px 20px;max-width:1400px;margin:0 auto}
+.card{background:#fff;border:1px solid var(--line);border-radius:6px;padding:14px;margin-bottom:14px}
+.card h2,.card h3{margin:0 0 8px}h2{font-size:16px}h3{font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+label{display:block;font-size:12px;color:var(--mut)}
+input,select,textarea{font:inherit;padding:4px 6px;border:1px solid var(--line);border-radius:4px;width:100%;background:#fff}
+textarea{resize:vertical}
+table{border-collapse:collapse;width:100%}
+th,td{padding:4px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-size:11px;text-transform:uppercase;color:var(--mut);background:#fafbfc}
+td.n,th.n{text-align:right;white-space:nowrap}
+tr.tot td{font-weight:700;background:#fafbfc}
+button.b{background:var(--red);color:#fff;border:0;border-radius:4px;padding:6px 12px;cursor:pointer;font:inherit}
+button.g{background:#fff;color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:5px 10px;cursor:pointer;font:inherit}
+button.x{background:none;border:0;color:var(--bad);cursor:pointer;font-size:16px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.note{color:var(--mut);font-size:12px}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.pos{color:var(--ok)}.neg{color:var(--bad)}
+.clin{border-left:4px solid var(--red)}
+.sub{margin:10px 0 0 14px;padding:8px;border:1px solid var(--line);border-radius:6px;background:#fcfcfd}
+.scroll{overflow-x:auto}
+.banner{padding:6px 10px;border-radius:4px;font-weight:600;margin-bottom:10px}
+.banner.int{background:#fdecea;color:var(--bad)}.banner.san{background:#e7f6ee;color:var(--ok)}
+.bars{display:flex;height:22px;border-radius:4px;overflow:hidden;margin:6px 0}
+.bars i{display:block;height:100%}
+.sw{display:inline-block;width:10px;height:10px;margin-right:4px;border-radius:2px}
+@media print{header,nav,.noprint{display:none!important}body{background:#fff}.card{border:0;padding:0}main{padding:0}}
+</style>
+</head>
+<body>
+<header>
+  <h1><span>Redline</span> Tactix Pricer</h1>
+  <div class="row noprint">
+    <button class="g" data-act="export">Export JSON</button>
+    <button class="g" data-act="import">Import JSON</button>
+    <button class="g" data-act="sample">Load sample</button>
+    <button class="g" data-act="new">New</button>
+    <input type="file" id="importFile" accept=".json" style="display:none">
+  </div>
+  <div id="kpis"></div>
+</header>
+<nav id="nav"></nav>
+<main id="main"></main>
+
+<script>
+//#CORE
+"use strict";
+const KINDS = { labor: "Labor", material: "Material", odc: "ODC", sub: "Subcontractor" };
+const num = (v) => { const n = parseFloat(v); return isFinite(n) ? n : 0; };
+
+function defaultState() {
+  return {
+    name: "New Proposal", solicitation: "", offeror: "Redline Tactix",
+    periods: [{ name: "Base Year" }, { name: "Option Year 1" }],
+    esc: { labor: 3, material: 2, odc: 2, sub: 3 },
+    rates: { fringe: 0, oh: 0, mh: 0, ga: 0, fccom: 0, profit: 8 },
+    gaOnSubs: true,
+    costAdj: 0,
+    lcats: [{ name: "Program Manager", rate: 95 }],
+    wbs: [{ id: "1.0", title: "Program Management", reqs: 0 }],
+    clins: [{ id: "0001", title: "Services", profit: "", subs: [
+      { id: "0001AA", title: "Program Management", wbs: "1.0", lines: [] }] }],
+    wi: { delta: 10, eL: 1, eO: 0.5 },
+    pws: "",
+  };
+}
+
+function nYears(S) { return S.periods.length; }
+function escFactor(S, kind, y) { return Math.pow(1 + num(S.esc[kind]) / 100, y); }
+function lineRate(S, l) {
+  if (l.kind === "labor") { const c = S.lcats.find((c) => c.name === l.lcat); return c ? num(c.rate) : num(l.rate); }
+  return num(l.rate);
+}
+const ZERO = () => ({ hrs: 0, dl: 0, fr: 0, oh: 0, mat: 0, mh: 0, odc: 0, sub: 0, ga: 0, cost: 0, fccom: 0, profit: 0, price: 0 });
+function addB(a, b) { const r = ZERO(); for (const k in r) r[k] = a[k] + b[k]; return r; }
+function sumB(arr) { return arr.reduce(addB, ZERO()); }
+
+// Build-up for one line in one period. scen = {labor:mult, other:mult} (what-if), profitRate in %.
+function lineBucket(S, l, y, profitRate, scen) {
+  const b = ZERO();
+  if (l.unallow) return b; // unallowable costs are excluded from the proposed price (FAR 31.201-6)
+  const y0 = l.y0 || 0, y1 = l.y1 == null || l.y1 === "" ? nYears(S) - 1 : l.y1;
+  if (y < y0 || y > y1) return b;
+  scen = scen || { labor: 1, other: 1 };
+  const adj = 1 + num(S.costAdj) / 100;
+  const mult = (l.kind === "labor" ? scen.labor : scen.other) * adj;
+  const amt = num(l.qty) * lineRate(S, l) * escFactor(S, l.kind, y) * mult;
+  const R = S.rates;
+  if (l.kind === "labor") { b.dl = amt; b.hrs = num(l.qty) * scen.labor; }
+  else if (l.kind === "material") b.mat = amt;
+  else if (l.kind === "odc") b.odc = amt;
+  else b.sub = amt;
+  b.fr = b.dl * num(R.fringe) / 100;
+  b.oh = (b.dl + b.fr) * num(R.oh) / 100;
+  b.mh = b.mat * num(R.mh) / 100;
+  const gaBase = b.dl + b.fr + b.oh + b.mat + b.mh + b.odc + (S.gaOnSubs ? b.sub : 0);
+  b.ga = gaBase * num(R.ga) / 100;
+  b.cost = b.dl + b.fr + b.oh + b.mat + b.mh + b.odc + b.sub + b.ga;
+  b.fccom = b.dl * num(R.fccom) / 100; // CAS 414 / FAR 31.205-10: separate from cost base
+  b.profit = b.cost * profitRate / 100; // fee base excludes FCCOM
+  b.price = b.cost + b.fccom + b.profit;
+  return b;
+}
+
+function compute(S, scen) {
+  const N = nYears(S);
+  const out = { clins: [], yrs: [], all: ZERO(), wbs: {} };
+  for (const c of S.clins) {
+    const pr = c.profit === "" || c.profit == null ? num(S.rates.profit) : num(c.profit);
+    const co = { yrs: [], subs: [] };
+    for (const s of c.subs) {
+      const so = { yrs: [], lines: [] };
+      for (const l of s.lines) {
+        const ys = []; for (let y = 0; y < N; y++) ys.push(lineBucket(S, l, y, pr, scen));
+        const tot = sumB(ys);
+        so.lines.push({ yrs: ys, all: tot });
+        const w = l.wbs || s.wbs || "(unmapped)";
+        out.wbs[w] = addB(out.wbs[w] || ZERO(), tot);
+      }
+      for (let y = 0; y < N; y++) so.yrs.push(sumB(so.lines.map((x) => x.yrs[y])));
+      so.all = sumB(so.yrs);
+      co.subs.push(so);
+    }
+    for (let y = 0; y < N; y++) co.yrs.push(sumB(co.subs.map((x) => x.yrs[y])));
+    co.all = sumB(co.yrs);
+    out.clins.push(co);
+  }
+  for (let y = 0; y < N; y++) out.yrs.push(sumB(out.clins.map((x) => x.yrs[y])));
+  out.all = sumB(out.yrs);
+  return out;
+}
+
+// Margin = profit / price; ROI = profit / total cost incurred (incl. FCCOM).
+function metrics(b) {
+  const costIn = b.cost + b.fccom;
+  return { margin: b.price ? (b.profit / b.price) * 100 : 0, roi: costIn ? (b.profit / costIn) * 100 : 0, costIn };
+}
+
+// What-if: delivery performance delta (%). + = delivery slips (longer duration), - = ahead of schedule.
+// Price stays fixed at baseline; cost moves with labor/other elasticity.
+function whatIf(S, delta) {
+  const base = compute(S);
+  const scen = { labor: 1 + (delta / 100) * num(S.wi.eL), other: 1 + (delta / 100) * num(S.wi.eO) };
+  const sc = compute(S, scen);
+  const price = base.all.price; // fixed-price assumption
+  const costIn = sc.all.cost + sc.all.fccom;
+  const profit = price - costIn;
+  return { delta, baseCostIn: base.all.cost + base.all.fccom, costIn, costDelta: costIn - (base.all.cost + base.all.fccom),
+    price, profit, margin: price ? (profit / price) * 100 : 0, roi: costIn ? (profit / costIn) * 100 : 0,
+    baseProfit: base.all.profit };
+}
+
+// ---- PWS / SOW / SOO parsing ----
+function parsePWS(text) {
+  const secs = []; let cur = null;
+  const re = /^\s*((?:[A-Z]\.)?\d+(?:\.\d+){0,3})[.)]?\s+(\S.{2,140})$/;
+  for (const raw of text.split(/\r?\n/)) {
+    const m = raw.match(re);
+    const isHeading = m && !/[.;]$/.test(m[2].trim()) && m[2].trim().split(/\s+/).length <= 14;
+    if (isHeading) {
+      const id = m[1].replace(/^[A-Z]\./, "");
+      cur = { id, level: id.split(".").length, title: m[2].trim(), reqs: 0 };
+      secs.push(cur);
+    } else if (cur) {
+      cur.reqs += (raw.match(/\b(shall|must|will provide)\b/gi) || []).length;
+    }
+  }
+  return secs;
+}
+function structureFromPWS(S, secs, level) {
+  const pick = secs.filter((s) => s.level === level);
+  if (!pick.length) return false;
+  S.wbs = secs.map((s) => ({ id: s.id, title: s.title, reqs: s.reqs }));
+  const first = S.lcats[0] ? S.lcats[0].name : "";
+  S.clins = [{ id: "0001", title: "Services (from PWS)", profit: "", subs: pick.map((s, i) => ({
+    id: "0001" + String.fromCharCode(65 + Math.floor(i / 26) % 26) + String.fromCharCode(65 + (i % 26)),
+    title: s.title, wbs: s.id,
+    lines: [{ kind: "labor", desc: "", lcat: first, qty: 0, rate: 0, y0: 0, y1: nYears(S) - 1, wbs: s.id, boe: "", unallow: false }] })) }];
+  return true;
+}
+
+// ---- GAAP / FAR / CAS hygiene checks ----
+function complianceChecks(S) {
+  const res = []; const add = (s, t) => res.push({ s, t });
+  const lines = []; S.clins.forEach((c) => c.subs.forEach((s) => s.lines.forEach((l) => lines.push({ c, s, l }))));
+  const noBoe = lines.filter((x) => !String(x.l.boe || "").trim());
+  add(noBoe.length ? "warn" : "ok", noBoe.length ? noBoe.length + " cost element(s) lack a Basis of Estimate" : "Every cost element has a BOE");
+  const noWbs = lines.filter((x) => !(x.l.wbs || x.s.wbs));
+  add(noWbs.length ? "warn" : "ok", noWbs.length ? noWbs.length + " cost element(s) not mapped to a WBS element" : "All cost elements mapped to WBS");
+  const badL = lines.filter((x) => x.l.kind === "labor" && !S.lcats.find((c) => c.name === x.l.lcat));
+  add(badL.length ? "bad" : "ok", badL.length ? badL.length + " labor line(s) reference an undefined labor category" : "Labor priced from the labor category rate table");
+  const noRate = ["fringe", "oh", "ga"].filter((k) => !num(S.rates[k]));
+  add(noRate.length ? "warn" : "ok", noRate.length ? "Indirect rate(s) are zero: " + noRate.join(", ") + " - confirm they are intended (e.g. rates already in loaded labor rates)" : "Fringe, OH, and G&A rates populated (applied consistently across all CLINs)");
+  const un = lines.filter((x) => x.l.unallow);
+  add("ok", un.length ? un.length + " unallowable item(s) excluded from price per FAR 31.201-6 / 31.205" : "No unallowable costs flagged (flag any on the Estimate tab to exclude them from price)");
+  const dbl = lines.filter((x) => x.l.kind !== "labor" && /overhead|g&a|g\&a|fringe|indirect|burden/i.test(x.l.desc || ""));
+  add(dbl.length ? "warn" : "ok", dbl.length ? "Possible double-count: " + dbl.length + " direct line(s) look like indirect cost (" + dbl.map((x) => x.l.desc).join("; ") + ")" : "No direct line items that look like indirect costs (consistent direct/indirect treatment)");
+  add(num(S.rates.fccom) ? "ok" : "warn", num(S.rates.fccom) ? "FCCOM priced as a separate element, excluded from the G&A and fee bases (CAS 414 / FAR 31.205-10)" : "FCCOM factor is zero - confirm no facilities capital cost of money is claimed");
+  const esc = Object.values(S.esc).some((v) => num(v));
+  add(S.periods.length > 1 && !esc ? "warn" : "ok", esc ? "Escalation applied by cost type and disclosed in the BOE" : "No escalation applied to out-years");
+  add(num(S.rates.profit) > 15 ? "warn" : "ok", "Profit/fee " + num(S.rates.profit).toFixed(1) + "% of cost" + (num(S.rates.profit) > 15 ? " - high versus typical FAR 15.404-4 ranges; expect evaluator scrutiny" : ""));
+  const empty = S.clins.flatMap((c) => c.subs).filter((s) => !s.lines.length);
+  add(empty.length ? "warn" : "ok", empty.length ? empty.length + " sub-CLIN(s) have no cost elements" : "All sub-CLINs priced");
+  return res;
+}
+//#ENDCORE
+
+// ================= UI =================
+const KEY = "redline-tactix-pricer-v1";
+let S, tab = "setup";
+const TABS = [["setup", "Setup & Rates"], ["pws", "PWS / SOW / SOO"], ["est", "Estimate (CLIN/WBS/BOE)"], ["multi", "Multiyear"],
+  ["analysis", "Analysis & What-If"], ["int", "Internal View"], ["san", "Sanitized View"], ["comp", "Compliance"]];
+const $ = (s) => document.querySelector(s);
+const esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const f0 = (n) => "$" + Math.round(n).toLocaleString("en-US");
+const f2 = (n) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pc = (n) => n.toFixed(1) + "%";
+const sc = (n) => (n >= 0 ? "pos" : "neg");
+
+function sample() {
+  const s = defaultState();
+  s.name = "Sample Enterprise IT Support"; s.solicitation = "SAMPLE-0001";
+  s.periods = [{ name: "Base Year" }, { name: "Option Year 1" }, { name: "Option Year 2" }];
+  s.rates = { fringe: 28, oh: 45, mh: 5, ga: 11, fccom: 0.35, profit: 8 };
+  s.lcats = [{ name: "Program Manager", rate: 85 }, { name: "Sr. Engineer", rate: 70 }, { name: "Analyst", rate: 48 }];
+  s.wbs = [{ id: "1.0", title: "Program Management", reqs: 0 }, { id: "2.0", title: "Engineering Support", reqs: 0 }, { id: "3.0", title: "Tools & Travel", reqs: 0 }];
+  const L = (kind, desc, lcat, qty, rate, wbs, boe, extra) => Object.assign({ kind, desc, lcat, qty, rate, y0: 0, y1: 2, wbs, boe, unallow: false }, extra);
+  s.clins = [
+    { id: "0001", title: "Services", profit: "", subs: [
+      { id: "0001AA", title: "Program Management", wbs: "1.0", lines: [L("labor", "Program Manager", "Program Manager", 1880, 0, "1.0", "1.0 FTE x 1,880 productive hrs; rate per current labor rate table; matches PWS 1.0 staffing.")] },
+      { id: "0001AB", title: "Engineering Support", wbs: "2.0", lines: [
+        L("labor", "Senior Engineers (2 FTE)", "Sr. Engineer", 3760, 0, "2.0", "2 FTE; analogous to prior contract X (same scope, ~3,700 hrs/yr)."),
+        L("labor", "Analysts (3 FTE)", "Analyst", 5640, 0, "2.0", "3 FTE per PWS 2.2 ticket volume (est. 1,900 tickets/yr).") ] } ] },
+    { id: "0002", title: "Materials, Travel & Subcontract", profit: "", subs: [
+      { id: "0002AA", title: "Materials & Travel", wbs: "3.0", lines: [
+        L("material", "Test equipment", "", 10, 2500, "3.0", "Vendor quote #Q-1234 (10 units).", { y1: 0 }),
+        L("odc", "Travel (6 trips)", "", 6, 1800, "3.0", "6 trips x $1,800 (airfare, lodging, per diem per JTR).") ] },
+      { id: "0002AB", title: "Subcontract", wbs: "2.0", lines: [
+        L("sub", "Specialty cyber subcontractor", "", 1, 120000, "2.0", "Sub proposal dated 2026-10-01; price reasonableness by competition.") ] } ] },
+  ];
+  return s;
+}
+function load() {
+  try { const t = localStorage.getItem(KEY); if (t) { S = Object.assign(defaultState(), JSON.parse(t)); return; } } catch (e) {}
+  S = sample();
+}
+function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
+
+function kpis() {
+  const r = compute(S), m = metrics(r.all);
+  $("#kpis").innerHTML = [["Total price", f0(r.all.price)], ["Total cost", f0(m.costIn)], ["Profit", f0(r.all.profit)],
+    ["Margin", pc(m.margin)], ["ROI", pc(m.roi)]].map((k) => '<div class="kpi"><b>' + k[1] + "</b><small>" + k[0] + "</small></div>").join("");
+}
+function nav() {
+  $("#nav").innerHTML = TABS.map((t) => '<button data-tab="' + t[0] + '" class="' + (t[0] === tab ? "on" : "") + '">' + t[1] + "</button>").join("");
+}
+function render() { nav(); kpis(); $("#main").innerHTML = VIEWS[tab](); save(); if (tab === "analysis") analysisResults(); }
+
+const inp = (p, v, t, extra) => '<input data-p="' + p + '" data-t="' + (t || "s") + '" value="' + esc(v) + '" ' + (t === "n" ? 'type="number" step="any"' : "") + " " + (extra || "") + ">";
+const fld = (lbl, p, v, t) => "<div><label>" + lbl + "</label>" + inp(p, v, t) + "</div>";
+const yrOpts = (sel) => S.periods.map((p, i) => '<option value="' + i + '"' + (i === sel ? " selected" : "") + ">" + esc(p.name) + "</option>").join("");
+
+const VIEWS = {
+setup() {
+  return '<div class="card"><h2>Proposal</h2><div class="grid">' + fld("Proposal name", "name", S.name) + fld("Solicitation #", "solicitation", S.solicitation) + fld("Offeror", "offeror", S.offeror) + "</div></div>" +
+  '<div class="card"><h2>Periods of performance</h2><div class="grid">' + S.periods.map((p, i) => "<div><label>Period " + (i + 1) + '</label><div class="row">' + inp("periods." + i + ".name", p.name) +
+    (i ? '<button class="x" data-act="delperiod" data-i="' + i + '">&times;</button>' : "") + "</div></div>").join("") +
+    '</div><p><button class="g" data-act="addperiod">+ Add option period</button></p></div>' +
+  '<div class="card"><h2>Escalation (% per year, compounded from the base year)</h2><div class="grid">' +
+    Object.keys(KINDS).map((k) => fld(KINDS[k], "esc." + k, S.esc[k], "n")).join("") + "</div></div>" +
+  '<div class="card"><h2>Indirect rates, FCCOM &amp; profit (%)</h2><div class="grid">' +
+    fld("Fringe (on direct labor)", "rates.fringe", S.rates.fringe, "n") + fld("Overhead (on labor + fringe)", "rates.oh", S.rates.oh, "n") +
+    fld("Material handling (on material)", "rates.mh", S.rates.mh, "n") + fld("G&A (on total cost input)", "rates.ga", S.rates.ga, "n") +
+    fld("FCCOM factor (on direct labor)", "rates.fccom", S.rates.fccom, "n") + fld("Profit / fee (on total cost, excl. FCCOM)", "rates.profit", S.rates.profit, "n") +
+    '<div><label>G&amp;A applies to subcontracts</label><select data-p="gaOnSubs" data-t="b"><option value="1"' + (S.gaOnSubs ? " selected" : "") + ">Yes</option><option value=\"0\"" + (S.gaOnSubs ? "" : " selected") + ">No</option></select></div></div>" +
+    '<p class="note">Rates are applied uniformly to all periods and CLINs (override fee per CLIN on the Estimate tab). Enter your own forward-pricing/provisional billing rates.</p></div>' +
+  '<div class="card"><h2>Labor categories (base, unburdened $/hr in base-year dollars)</h2><table><tr><th>Category</th><th>Rate</th><th></th></tr>' +
+    S.lcats.map((c, i) => "<tr><td>" + inp("lcats." + i + ".name", c.name) + "</td><td>" + inp("lcats." + i + ".rate", c.rate, "n") + '</td><td><button class="x" data-act="dellcat" data-i="' + i + '">&times;</button></td></tr>').join("") +
+    '</table><p><button class="g" data-act="addlcat">+ Add labor category</button></p></div>' +
+  '<div class="card"><h2>WBS elements</h2><table><tr><th>ID</th><th>Title</th><th>PWS reqs</th><th></th></tr>' +
+    S.wbs.map((w, i) => "<tr><td>" + inp("wbs." + i + ".id", w.id) + "</td><td>" + inp("wbs." + i + ".title", w.title) + "</td><td class=n>" + (w.reqs || 0) + '</td><td><button class="x" data-act="delwbs" data-i="' + i + '">&times;</button></td></tr>').join("") +
+    '</table><p><button class="g" data-act="addwbs">+ Add WBS element</button></p></div>';
+},
+pws() {
+  const secs = parsePWS(S.pws || "");
+  const lv = [...new Set(secs.map((s) => s.level))].sort();
+  return '<div class="card"><h2>PWS / SOW / SOO</h2><p class="note">Paste the text or upload a .txt/.md file (for PDF/Word, copy-paste the text). Numbered headings (e.g. "3.1 Help Desk") become WBS elements; "shall/must" statements are counted per section.</p>' +
+    '<div class="row"><input type="file" id="pwsFile" accept=".txt,.md,.text" style="width:auto"></div>' +
+    '<textarea id="pwsText" rows="14" placeholder="Paste PWS / SOW / SOO text here...">' + esc(S.pws || "") + "</textarea></div>" +
+    '<div class="card"><h2>Detected structure (' + secs.length + " sections)</h2>" + (secs.length ?
+    '<div class="scroll"><table><tr><th>Section</th><th>Level</th><th>Title</th><th class=n>Requirements</th></tr>' + secs.map((s) => "<tr><td>" + esc(s.id) + "</td><td>" + s.level + "</td><td>" + esc(s.title) + '</td><td class="n">' + s.reqs + "</td></tr>").join("") + "</table></div>" +
+    '<p class="row">Create one sub-CLIN per section at level <select id="pwsLevel" style="width:auto">' + lv.map((l) => '<option value="' + l + '"' + (l === (lv.includes(2) ? 2 : lv[0]) ? " selected" : "") + ">" + l + "</option>").join("") +
+    '</select> <button class="b" data-act="buildpws">Build WBS + CLIN structure</button></p><p class="note">This replaces the current WBS and CLINs (you will be asked to confirm). Each sub-CLIN gets a starter labor line to fill in.</p>'
+    : '<p class="note">No numbered headings found yet.</p>') + "</div>";
+},
+est() {
+  const r = compute(S);
+  const wbsOpts = (sel) => '<option value="">(none)</option>' + S.wbs.map((w) => '<option value="' + esc(w.id) + '"' + (w.id === sel ? " selected" : "") + ">" + esc(w.id + " " + w.title) + "</option>").join("");
+  return '<p class="note">Costs shown are <b>direct</b> (escalated). Burdened price rolls up on the views and the KPI bar. Hours/qty are per period for each period the line is active.</p>' +
+  S.clins.map((c, ci) => '<div class="card clin"><div class="row"><b>CLIN</b><div style="width:90px">' + inp("clins." + ci + ".id", c.id) + '</div><div style="flex:1;min-width:200px">' + inp("clins." + ci + ".title", c.title) +
+    '</div><div style="width:130px"><label>Fee % override</label>' + inp("clins." + ci + ".profit", c.profit, "o") + '</div><div class="n"><b>' + f0(r.clins[ci].all.price) + '</b></div><button class="x" data-act="delclin" data-i="' + ci + '">&times;</button></div>' +
+    c.subs.map((s, si) => '<div class="sub"><div class="row"><b>Sub-CLIN</b><div style="width:100px">' + inp("clins." + ci + ".subs." + si + ".id", s.id) + '</div><div style="flex:1;min-width:180px">' + inp("clins." + ci + ".subs." + si + ".title", s.title) +
+      '</div><select style="width:200px" data-p="clins.' + ci + ".subs." + si + '.wbs">' + wbsOpts(s.wbs) + "</select><b>" + f0(r.clins[ci].subs[si].all.price) + '</b><button class="x" data-act="delsub" data-c="' + ci + '" data-i="' + si + '">&times;</button></div>' +
+      '<div class="scroll"><table><tr><th>Type</th><th>Description</th><th>Labor cat</th><th>Hrs / Qty</th><th>Rate / Unit $</th><th>From</th><th>To</th><th>WBS</th><th>Unallow.</th><th class=n>Direct $</th><th></th></tr>' +
+      s.lines.map((l, li) => { const p = "clins." + ci + ".subs." + si + ".lines." + li + "."; const lab = l.kind === "labor";
+        return "<tr><td><select data-p=\"" + p + 'kind">' + Object.keys(KINDS).map((k) => '<option value="' + k + '"' + (k === l.kind ? " selected" : "") + ">" + KINDS[k] + "</option>").join("") + "</select></td>" +
+        "<td>" + inp(p + "desc", l.desc) + "</td><td>" + (lab ? '<select data-p="' + p + 'lcat">' + S.lcats.map((c2) => '<option' + (c2.name === l.lcat ? " selected" : "") + ">" + esc(c2.name) + "</option>").join("") + "</select>" : "-") + "</td>" +
+        "<td>" + inp(p + "qty", l.qty, "n", 'style="width:90px"') + "</td><td>" + (lab ? f2(lineRate(S, l)) : inp(p + "rate", l.rate, "n", 'style="width:100px"')) + "</td>" +
+        '<td><select data-p="' + p + 'y0" data-t="i">' + yrOpts(l.y0 || 0) + '</select></td><td><select data-p="' + p + 'y1" data-t="i">' + yrOpts(l.y1 == null ? nYears(S) - 1 : l.y1) + "</select></td>" +
+        '<td><select data-p="' + p + 'wbs">' + wbsOpts(l.wbs) + '</select></td><td><input type="checkbox" data-p="' + p + 'unallow" data-t="c"' + (l.unallow ? " checked" : "") + '></td>' +
+        '<td class="n">' + f0(r.clins[ci].subs[si].lines[li].all.dl + r.clins[ci].subs[si].lines[li].all.mat + r.clins[ci].subs[si].lines[li].all.odc + r.clins[ci].subs[si].lines[li].all.sub) + '</td><td><button class="x" data-act="delline" data-c="' + ci + '" data-s="' + si + '" data-i="' + li + '">&times;</button></td></tr>' +
+        '<tr><td></td><td colspan="10"><textarea rows="2" placeholder="Basis of Estimate - rationale, source (quote, historical, parametric), assumptions" data-p="' + p + 'boe">' + esc(l.boe) + "</textarea></td><td></td></tr>"; }).join("") +
+      '</table></div><p><button class="g" data-act="addline" data-c="' + ci + '" data-s="' + si + '">+ Cost element</button></p></div>').join("") +
+    '<p><button class="g" data-act="addsub" data-c="' + ci + '">+ Sub-CLIN</button></p></div>').join("") +
+  '<p><button class="b" data-act="addclin">+ CLIN</button></p>';
+},
+multi() {
+  const r = compute(S); const head = S.periods.map((p) => "<th class=n>" + esc(p.name) + "</th>").join("") + "<th class=n>Total</th>";
+  const row = (lbl, fn, cls) => "<tr" + (cls ? ' class="' + cls + '"' : "") + "><td>" + lbl + "</td>" + r.yrs.concat([r.all]).map((b) => '<td class="n">' + fn(b) + "</td>").join("") + "</tr>";
+  return '<div class="card"><h2>Multiyear price summary</h2><div class="scroll"><table><tr><th>Element</th>' + head + "</tr>" +
+    row("Direct labor", (b) => f0(b.dl)) + row("Material (direct)", (b) => f0(b.mat)) + row("ODCs (direct)", (b) => f0(b.odc)) + row("Subcontracts (direct)", (b) => f0(b.sub)) +
+    row("<b>Total direct</b>", (b) => f0(b.dl + b.mat + b.odc + b.sub), "tot") +
+    row("Fringe", (b) => f0(b.fr)) + row("Overhead", (b) => f0(b.oh)) + row("Material handling", (b) => f0(b.mh)) + row("G&A", (b) => f0(b.ga)) +
+    row("<b>Total indirect</b>", (b) => f0(b.fr + b.oh + b.mh + b.ga), "tot") + row("<b>Total cost</b>", (b) => f0(b.cost), "tot") + row("FCCOM", (b) => f0(b.fccom)) +
+    row("Profit / fee", (b) => f0(b.profit)) + row("<b>Total price</b>", (b) => f0(b.price), "tot") + row("Margin", (b) => pc(metrics(b).margin)) +
+    row("Direct labor hours", (b) => Math.round(b.hrs).toLocaleString()) + "</table></div></div>" +
+  '<div class="card"><h2>Price by CLIN and period</h2><div class="scroll"><table><tr><th>CLIN</th>' + head + "</tr>" +
+    S.clins.map((c, i) => "<tr><td>" + esc(c.id + " " + c.title) + "</td>" + r.clins[i].yrs.concat([r.clins[i].all]).map((b) => '<td class="n">' + f0(b.price) + "</td>").join("") + "</tr>").join("") + "</table></div>" +
+    '<p class="note">Escalation: ' + Object.keys(KINDS).map((k) => KINDS[k] + " " + num(S.esc[k]) + "%/yr").join(", ") + ".</p></div>";
+},
+analysis() {
+  return '<div class="card"><h2>Adjust &amp; see the effect immediately</h2><div class="grid">' +
+    '<div><label>Profit / fee: <b id="v_p">' + pc(num(S.rates.profit)) + '</b></label><input type="range" min="0" max="20" step="0.1" id="sl_p" value="' + num(S.rates.profit) + '"></div>' +
+    '<div><label>All direct costs adjustment: <b id="v_c">' + num(S.costAdj).toFixed(1) + '%</b></label><input type="range" min="-20" max="20" step="0.5" id="sl_c" value="' + num(S.costAdj) + '"></div>' +
+    '<div><label>G&amp;A rate: <b id="v_g">' + pc(num(S.rates.ga)) + '</b></label><input type="range" min="0" max="30" step="0.1" id="sl_g" value="' + num(S.rates.ga) + '"></div>' +
+    '<div><label>Overhead rate: <b id="v_o">' + pc(num(S.rates.oh)) + '</b></label><input type="range" min="0" max="100" step="0.5" id="sl_o" value="' + num(S.rates.oh) + '"></div></div>' +
+    '<p class="note">Sliders change the working proposal (saved). Cost adjustment scales all direct cost elements; reset it to 0 to return to the estimate as entered. Per-CLIN fee overrides are not moved by the fee slider.</p></div>' +
+  '<div id="res"></div>' +
+  '<div class="card"><h2>What-if: delivery performance</h2><div class="grid">' +
+    '<div><label>Delivery performance variance: <b id="v_d">' + (S.wi.delta > 0 ? "+" : "") + S.wi.delta + '%</b> (+ = slips / longer, - = early)</label><input type="range" min="-30" max="50" step="1" id="sl_d" value="' + S.wi.delta + '"></div>' +
+    fld("Labor cost elasticity (1 = hours move 1:1)", "wi.eL", S.wi.eL, "n") + fld("Non-labor elasticity (material/ODC/sub)", "wi.eO", S.wi.eO, "n") + '</div><div id="wires"></div></div>';
+},
+int() { return '<div class="banner int">INTERNAL - PROPRIETARY. Contains rates, cost build-up and margin. Do not release.</div><div class="row noprint"><button class="b" onclick="window.print()">Print</button><button class="g" data-act="csv-int">Download CSV</button></div>' + internalHtml(); },
+san() { return '<div class="banner san">SANITIZED - suitable for submission. CLIN-level pricing only; no rates, cost build-up, BOE, or margin.</div><div class="row noprint"><button class="b" onclick="window.print()">Print</button><button class="g" data-act="csv-san">Download CSV</button></div>' + sanitizedHtml(); },
+comp() {
+  const cls = { ok: "&#10003;", warn: "&#9888;", bad: "&#10007;" };
+  return '<div class="card"><h2>GAAP / FAR / CAS cost-treatment checks</h2><table>' + complianceChecks(S).map((c) => '<tr><td class="' + c.s + '" style="width:24px">' + cls[c.s] + "</td><td>" + esc(c.t) + "</td></tr>").join("") + "</table></div>" +
+  '<div class="card"><h3>How costs are treated</h3><ul><li>Direct costs (labor, material, ODC, subcontracts) are separated from indirect costs (fringe, overhead, material handling, G&amp;A) in every roll-up.</li>' +
+  "<li>Indirect rates are applied through consistent allocation bases: fringe on direct labor; OH on labor + fringe; G&amp;A on total cost input (the same base for all CLINs).</li>" +
+  "<li>FCCOM is computed separately (CAS 414) and excluded from the G&amp;A and fee bases; fee is computed on total cost.</li>" +
+  "<li>Items flagged unallowable are excluded from the price.</li><li>Costs are recognized in the period incurred, with escalation by cost type (accrual basis).</li></ul>" +
+  '<p class="note">These are automated hygiene checks, not a legal/accounting opinion. Rates must match your disclosed practices, provisional billing rates and CAS Disclosure Statement; have your cost accounting lead review before submission.</p></div>';
+},
+};
+
+function costRows(b) { return [["Direct labor", b.dl], ["Material", b.mat], ["ODCs", b.odc], ["Subcontracts", b.sub], ["Total direct", b.dl + b.mat + b.odc + b.sub, 1],
+  ["Fringe", b.fr], ["Overhead", b.oh], ["Material handling", b.mh], ["G&A", b.ga], ["Total indirect", b.fr + b.oh + b.mh + b.ga, 1],
+  ["Total cost", b.cost, 1], ["FCCOM", b.fccom], ["Profit / fee", b.profit], ["Total price", b.price, 1]]; }
+
+function internalHtml() {
+  const r = compute(S), m = metrics(r.all), N = nYears(S);
+  let h = '<div class="card"><h2>' + esc(S.name) + " - Internal cost proposal</h2><p>Solicitation " + esc(S.solicitation || "-") + " &middot; " + esc(S.offeror) + "</p><p><b>Price " + f0(r.all.price) + "</b> &middot; Cost " + f0(m.costIn) +
+    " &middot; Profit " + f0(r.all.profit) + " &middot; Margin " + pc(m.margin) + " &middot; ROI " + pc(m.roi) + "</p><p class=note>Rates: fringe " + S.rates.fringe + "%, OH " + S.rates.oh + "%, MH " + S.rates.mh + "%, G&amp;A " + S.rates.ga + "%" +
+    (S.gaOnSubs ? " (incl. subs)" : " (excl. subs)") + ", FCCOM " + S.rates.fccom + "% of DL, fee " + S.rates.profit + "%. Cost adjustment " + S.costAdj + "%.</p></div>";
+  S.clins.forEach((c, ci) => {
+    const co = r.clins[ci], cm = metrics(co.all);
+    h += '<div class="card clin"><h2>CLIN ' + esc(c.id) + " - " + esc(c.title) + " &mdash; " + f0(co.all.price) + " (margin " + pc(cm.margin) + ", ROI " + pc(cm.roi) + ")</h2>";
+    c.subs.forEach((s, si) => {
+      const so = co.subs[si];
+      h += '<div class="sub"><h3>Sub-CLIN ' + esc(s.id) + " - " + esc(s.title) + " (WBS " + esc(s.wbs || "-") + ")</h3><div class=scroll><table><tr><th>Type</th><th>Element</th><th>WBS</th><th>Basis (qty x rate, escalated)</th><th>Periods</th><th class=n>Direct $</th><th>BOE</th></tr>" +
+        s.lines.map((l, li) => { const b = so.lines[li].all; const ys = so.lines[li].yrs;
+          return "<tr><td>" + KINDS[l.kind] + "</td><td>" + esc(l.desc) + (l.kind === "labor" ? " (" + esc(l.lcat) + ")" : "") + (l.unallow ? " <b class=bad>[UNALLOWABLE - EXCLUDED]</b>" : "") + "</td><td>" + esc(l.wbs || s.wbs || "") + "</td><td>" + num(l.qty).toLocaleString() + " x " + f2(lineRate(S, l)) + "</td><td>" +
+          esc(S.periods[l.y0 || 0].name) + " &ndash; " + esc(S.periods[l.y1 == null ? N - 1 : Math.min(l.y1, N - 1)].name) + '</td><td class="n">' + f0(b.dl + b.mat + b.odc + b.sub) + "</td><td>" + esc(l.boe || "(missing)") + "</td></tr>"; }).join("") + "</table></div>" +
+        '<table><tr><th>Cost build-up</th>' + S.periods.map((p) => "<th class=n>" + esc(p.name) + "</th>").join("") + "<th class=n>Total</th></tr>" +
+        costRows(so.all).map((row, i) => "<tr" + (row[2] ? ' class="tot"' : "") + "><td>" + row[0] + "</td>" + so.yrs.map((yb) => '<td class="n">' + f0(costRows(yb)[i][1]) + "</td>").join("") + '<td class="n">' + f0(row[1]) + "</td></tr>").join("") + "</table></div>";
+    });
+    h += "</div>";
+  });
+  h += '<div class="card"><h2>WBS roll-up (direct vs. burdened)</h2><table><tr><th>WBS</th><th class=n>Direct</th><th class=n>Indirect</th><th class=n>FCCOM</th><th class=n>Profit</th><th class=n>Price</th></tr>' +
+    Object.keys(r.wbs).sort().map((k) => { const b = r.wbs[k], w = S.wbs.find((x) => x.id === k); return "<tr><td>" + esc(k + (w ? " " + w.title : "")) + '</td><td class="n">' + f0(b.dl + b.mat + b.odc + b.sub) + '</td><td class="n">' + f0(b.fr + b.oh + b.mh + b.ga) + '</td><td class="n">' + f0(b.fccom) + '</td><td class="n">' + f0(b.profit) + '</td><td class="n">' + f0(b.price) + "</td></tr>"; }).join("") + "</table></div>";
+  h += '<div class="card"><h2>Labor rate table</h2><table><tr><th>Category</th><th class=n>Base rate</th>' + S.periods.map((p, i) => "<th class=n>" + esc(p.name) + "</th>").join("") + "</tr>" +
+    S.lcats.map((c) => "<tr><td>" + esc(c.name) + '</td><td class="n">' + f2(num(c.rate)) + "</td>" + S.periods.map((p, i) => '<td class="n">' + f2(num(c.rate) * escFactor(S, "labor", i)) + "</td>").join("") + "</tr>").join("") + "</table></div>";
+  return h;
+}
+
+function sanitizedHtml() {
+  const r = compute(S);
+  const head = S.periods.map((p) => "<th class=n>" + esc(p.name) + "</th>").join("") + "<th class=n>Total</th>";
+  let h = '<div class="card"><h2>' + esc(S.name) + " - Price Proposal</h2><p>Solicitation " + esc(S.solicitation || "-") + " &middot; Offeror: " + esc(S.offeror) + "</p>" +
+    '<table><tr><th>CLIN / Sub-CLIN</th><th>Description</th>' + head + "</tr>";
+  S.clins.forEach((c, ci) => {
+    const co = r.clins[ci];
+    h += '<tr class="tot"><td>' + esc(c.id) + "</td><td>" + esc(c.title) + "</td>" + co.yrs.concat([co.all]).map((b) => '<td class="n">' + f0(b.price) + "</td>").join("") + "</tr>";
+    c.subs.forEach((s, si) => { const so = r.clins[ci].subs[si];
+      h += "<tr><td>&nbsp;&nbsp;" + esc(s.id) + "</td><td>" + esc(s.title) + "</td>" + so.yrs.concat([so.all]).map((b) => '<td class="n">' + f0(b.price) + "</td>").join("") + "</tr>"; });
+  });
+  h += '<tr class="tot"><td colspan="2">TOTAL PRICE</td>' + r.yrs.concat([r.all]).map((b) => '<td class="n">' + f0(b.price) + "</td>").join("") + "</tr></table>" +
+    '<p class="note">Prices are fully burdened total prices in then-year dollars, inclusive of all direct and indirect costs and fee.</p></div>';
+  return h;
+}
+
+function csvDownload(name, rows) {
+  const t = rows.map((r) => r.map((c) => '"' + String(c).replace(/"/g, '""') + '"').join(",")).join("\n");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([t], { type: "text/csv" })); a.download = name; a.click();
+}
+function csvSan() {
+  const r = compute(S); const rows = [["CLIN", "Description"].concat(S.periods.map((p) => p.name), ["Total"])];
+  S.clins.forEach((c, ci) => { rows.push([c.id, c.title].concat(r.clins[ci].yrs.map((b) => b.price.toFixed(2)), [r.clins[ci].all.price.toFixed(2)]));
+    c.subs.forEach((s, si) => rows.push([s.id, s.title].concat(r.clins[ci].subs[si].yrs.map((b) => b.price.toFixed(2)), [r.clins[ci].subs[si].all.price.toFixed(2)]))); });
+  rows.push(["TOTAL", ""].concat(r.yrs.map((b) => b.price.toFixed(2)), [r.all.price.toFixed(2)]));
+  csvDownload("proposal-sanitized.csv", rows);
+}
+function csvInt() {
+  const r = compute(S); const rows = [["CLIN", "Sub-CLIN", "Type", "Element", "WBS", "Qty", "Rate", "BOE", "DL", "Fringe", "OH", "Material", "MH", "ODC", "Sub", "G&A", "Cost", "FCCOM", "Profit", "Price"]];
+  S.clins.forEach((c, ci) => c.subs.forEach((s, si) => s.lines.forEach((l, li) => { const b = r.clins[ci].subs[si].lines[li].all;
+    rows.push([c.id, s.id, l.kind, l.desc, l.wbs || s.wbs, l.qty, lineRate(S, l), l.boe].concat([b.dl, b.fr, b.oh, b.mat, b.mh, b.odc, b.sub, b.ga, b.cost, b.fccom, b.profit, b.price].map((x) => x.toFixed(2)))); })));
+  csvDownload("proposal-internal.csv", rows);
+}
+
+function analysisResults() {
+  const r = compute(S), m = metrics(r.all);
+  const tot = r.all, parts = [["Direct", tot.dl + tot.mat + tot.odc + tot.sub, "#2b6cb0"], ["Indirect", tot.fr + tot.oh + tot.mh + tot.ga, "#718096"], ["FCCOM", tot.fccom, "#d69e2e"], ["Profit", tot.profit, "#b3202a"]];
+  $("#res").innerHTML = '<div class="card"><h2>Results</h2><div class="grid"><div><label>Total price</label><b>' + f0(tot.price) + "</b></div><div><label>Total cost</label><b>" + f0(m.costIn) + "</b></div><div><label>Profit</label><b>" + f0(tot.profit) +
+    "</b></div><div><label>Margin (profit / price)</label><b>" + pc(m.margin) + "</b></div><div><label>ROI (profit / cost)</label><b>" + pc(m.roi) + "</b></div></div>" +
+    '<div class="bars">' + parts.map((p) => '<i title="' + p[0] + '" style="width:' + (tot.price ? (p[1] / tot.price) * 100 : 0) + "%;background:" + p[2] + '"></i>').join("") + "</div>" +
+    parts.map((p) => '<span class="note"><span class="sw" style="background:' + p[2] + '"></span>' + p[0] + " " + f0(p[1]) + " &nbsp; </span>").join("") +
+    '<table style="margin-top:10px"><tr><th>CLIN</th><th class=n>Price</th><th class=n>Cost</th><th class=n>Profit</th><th class=n>Margin</th><th class=n>ROI</th></tr>' +
+    S.clins.map((c, i) => { const b = r.clins[i].all, mm = metrics(b); return "<tr><td>" + esc(c.id + " " + c.title) + '</td><td class="n">' + f0(b.price) + '</td><td class="n">' + f0(mm.costIn) + '</td><td class="n">' + f0(b.profit) + '</td><td class="n">' + pc(mm.margin) + '</td><td class="n">' + pc(mm.roi) + "</td></tr>"; }).join("") + "</table></div>";
+  const rows = [-20, -10, 0, 10, 20, S.wi.delta].filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b).map((d) => whatIf(S, d));
+  $("#wires").innerHTML = '<p class="note">Assumes the price is fixed at the current proposal (firm-fixed-price exposure); cost moves with delivery variance. Hours scale by variance x labor elasticity; other costs by non-labor elasticity; indirects follow.</p>' +
+    '<table><tr><th>Variance</th><th class=n>Cost</th><th class=n>Cost impact</th><th class=n>Price (fixed)</th><th class=n>Profit</th><th class=n>Margin</th><th class=n>ROI</th></tr>' +
+    rows.map((w) => "<tr" + (w.delta === S.wi.delta ? ' class="tot"' : "") + "><td>" + (w.delta > 0 ? "+" : "") + w.delta + '%</td><td class="n">' + f0(w.costIn) + '</td><td class="n ' + (w.costDelta > 0 ? "neg" : "pos") + '">' + (w.costDelta > 0 ? "+" : "") + f0(w.costDelta) +
+      '</td><td class="n">' + f0(w.price) + '</td><td class="n ' + sc(w.profit) + '">' + f0(w.profit) + '</td><td class="n ' + sc(w.margin) + '">' + pc(w.margin) + '</td><td class="n ' + sc(w.roi) + '">' + pc(w.roi) + "</td></tr>").join("") + "</table>";
+}
+
+// ---- events ----
+function setPath(p, v) { const k = p.split("."); let o = S; for (let i = 0; i < k.length - 1; i++) o = o[k[i]]; o[k[k.length - 1]] = v; }
+function conv(el) { const t = el.dataset.t; return t === "n" ? (el.value === "" ? 0 : num(el.value)) : t === "o" ? el.value : t === "i" ? parseInt(el.value, 10) : t === "c" ? el.checked : t === "b" ? el.value === "1" : el.value; }
+document.addEventListener("input", (e) => {
+  const el = e.target;
+  if (el.dataset.p && el.dataset.t === "n") { setPath(el.dataset.p, conv(el)); save(); kpis(); if (tab === "analysis") analysisResults(); return; }
+  const sl = { sl_p: ["rates.profit", "v_p", pc], sl_c: ["costAdj", "v_c", (v) => v.toFixed(1) + "%"], sl_g: ["rates.ga", "v_g", pc], sl_o: ["rates.oh", "v_o", pc], sl_d: ["wi.delta", "v_d", (v) => (v > 0 ? "+" : "") + v + "%"] }[el.id];
+  if (sl) { const v = parseFloat(el.value); setPath(sl[0], v); $("#" + sl[1]).textContent = sl[2](v); save(); kpis(); analysisResults(); }
+  if (el.id === "pwsText") { S.pws = el.value; save(); }
+});
+document.addEventListener("change", (e) => {
+  const el = e.target;
+  if (el.id === "pwsText") { S.pws = el.value; render(); return; }
+  if (el.id === "pwsFile") { const f = el.files[0]; if (f) { const fr = new FileReader(); fr.onload = () => { S.pws = String(fr.result); render(); }; fr.readAsText(f); } return; }
+  if (el.id === "importFile") { const f = el.files[0]; if (f) { const fr = new FileReader(); fr.onload = () => { try { S = Object.assign(defaultState(), JSON.parse(fr.result)); render(); } catch (x) { alert("Invalid JSON file"); } }; fr.readAsText(f); } return; }
+  if (!el.dataset.p) return;
+  const v = conv(el);
+  if (el.dataset.p.endsWith(".kind") && v !== "labor") { /* keep rate */ }
+  setPath(el.dataset.p, v);
+  if (el.dataset.p.endsWith(".wbs") && el.dataset.p.includes(".subs.") === false) { /* line wbs */ }
+  render();
+});
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-tab],[data-act]"); if (!t) return;
+  if (t.dataset.tab) { tab = t.dataset.tab; render(); return; }
+  const a = t.dataset.act, i = +t.dataset.i, c = +t.dataset.c, s = +t.dataset.s;
+  const N = () => nYears(S) - 1;
+  const A = {
+    addperiod() { S.periods.push({ name: "Option Year " + S.periods.length }); },
+    delperiod() { S.periods.splice(i, 1); S.clins.forEach((cl) => cl.subs.forEach((sb) => sb.lines.forEach((l) => { l.y0 = Math.min(l.y0 || 0, N()); l.y1 = Math.min(l.y1 == null ? N() : l.y1, N()); }))); },
+    addlcat() { S.lcats.push({ name: "New category", rate: 0 }); }, dellcat() { S.lcats.splice(i, 1); },
+    addwbs() { S.wbs.push({ id: String(S.wbs.length + 1) + ".0", title: "New element", reqs: 0 }); }, delwbs() { S.wbs.splice(i, 1); },
+    addclin() { const n = S.clins.length + 1; S.clins.push({ id: String(n).padStart(4, "0"), title: "New CLIN", profit: "", subs: [] }); },
+    delclin() { if (confirm("Delete this CLIN and everything under it?")) S.clins.splice(i, 1); },
+    addsub() { const cl = S.clins[c]; cl.subs.push({ id: cl.id + String.fromCharCode(65 + Math.floor(cl.subs.length / 26) % 26) + String.fromCharCode(65 + (cl.subs.length % 26)), title: "New sub-CLIN", wbs: "", lines: [] }); },
+    delsub() { if (confirm("Delete this sub-CLIN?")) S.clins[c].subs.splice(i, 1); },
+    addline() { S.clins[c].subs[s].lines.push({ kind: "labor", desc: "", lcat: S.lcats[0] ? S.lcats[0].name : "", qty: 0, rate: 0, y0: 0, y1: N(), wbs: S.clins[c].subs[s].wbs || "", boe: "", unallow: false }); },
+    delline() { S.clins[c].subs[s].lines.splice(i, 1); },
+    buildpws() { const lv = parseInt($("#pwsLevel").value, 10); if (!confirm("Replace the current WBS and CLIN structure with the one parsed from the PWS?")) return;
+      if (!structureFromPWS(S, parsePWS(S.pws || ""), lv)) alert("No sections at that level."); else tab = "est"; },
+    export() { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(S, null, 2)], { type: "application/json" })); a.download = (S.name || "proposal").replace(/\W+/g, "_") + ".json"; a.click(); },
+    import() { $("#importFile").click(); },
+    sample() { if (confirm("Replace the current proposal with the sample?")) S = sample(); },
+    new() { if (confirm("Start a new empty proposal? Export first if you need the current one.")) S = defaultState(); },
+    "csv-int"() { csvInt(); }, "csv-san"() { csvSan(); },
+  };
+  if (A[a]) { A[a](); render(); }
+});
+if (typeof document !== "undefined" && typeof window !== "undefined") { load(); render(); }
+</script>
+</body>
+</html>
