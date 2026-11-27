@@ -1,3 +1,9 @@
-name = "redline-tactix-pricer"
+name = "redlinetactix-pricer"
 main = "src/index.js"
 compatibility_date = "2026-11-24"
+
+# The shared cost engine is served to the browser as text, and also imported by Node tests as a module.
+[[rules]]
+type = "Text"
+globs = ["**/*.client.js"]
+fallthrough = true

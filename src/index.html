@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redline Tactix Pricer</title>
+<style>
+:root{--ink:#1d2430;--mut:#667085;--line:#e1e5ec;--bg:#f5f6f9;--card:#fff;--red:#c62828;--ok:#1b7f4b;--warn:#b26a00}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;color:var(--ink);background:var(--bg)}
+header{background:var(--ink);color:#fff;padding:10px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+header h1{font-size:17px;margin:0}header h1 b{color:#ff6b6b}
+.seg{display:inline-flex;border:1px solid #556;border-radius:6px;overflow:hidden}
+.seg button{background:transparent;color:#cdd;border:0;padding:6px 12px;cursor:pointer}
+.seg button.on{background:var(--red);color:#fff}
+.sp{flex:1}
+header .btn{background:#2d3646;color:#fff;border-color:#445}
+.kpis{display:flex;gap:10px;padding:12px 20px;flex-wrap:wrap}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 14px;min-width:120px}
+.kpi small{display:block;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+.kpi b{font-size:18px}
+nav{padding:0 20px;display:flex;gap:4px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+nav button{background:none;border:0;border-bottom:3px solid transparent;padding:10px 14px;cursor:pointer;font-size:14px;color:var(--mut)}
+nav button.on{color:var(--ink);border-color:var(--red);font-weight:600}
+main{padding:16px 20px;max-width:1280px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:14px;overflow-x:auto}
+.card h2{font-size:15px;margin:0 0 10px}
+.note{color:var(--mut);font-size:12px}
+table{border-collapse:collapse;width:100%}
+th,td{padding:5px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{font-size:11px;text-transform:uppercase;color:var(--mut);letter-spacing:.03em;white-space:nowrap}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+input,select,textarea{font:inherit;padding:5px 7px;border:1px solid #c9cfda;border-radius:5px;background:#fff;max-width:100%}
+input.s{width:78px}input.m{width:150px}input.l{width:100%}
+textarea{width:100%;min-height:150px}
+.btn{font:inherit;padding:6px 12px;border:1px solid #c9cfda;border-radius:6px;background:#fff;cursor:pointer}
+.btn.pri{background:var(--red);color:#fff;border-color:var(--red)}
+.btn.x{padding:2px 8px;color:var(--red)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+label.f{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--mut)}
+.sl{display:grid;grid-template-columns:150px 1fr 70px;gap:10px;align-items:center;margin:6px 0}
+.sl input[type=range]{padding:0}
+.sl input[type=number]{width:70px}.sl .u{display:flex;align-items:center;gap:4px}
+.quoteview header,.quoteview .kpis{display:none!important}
+.pos{color:var(--ok)}.neg{color:var(--red)}
+.tot td{font-weight:700;border-top:2px solid var(--ink)}
+.sub td:first-child{padding-left:26px}
+.chk{padding:6px 10px;border-left:4px solid var(--line);margin:6px 0;background:#fafbfc}
+.chk.warn{border-color:var(--warn)}.chk.info{border-color:#6a8dd6}
+.sheet{background:#fff;padding:26px;border:1px solid var(--line)}
+.fed{display:none}.isfed .fed{display:table-cell}.isfed div.fed{display:block}
+.com-only{display:block}.isfed .com-only{display:none}
+@media print{header,.kpis,nav,.noprint{display:none!important}body{background:#fff}main{padding:0}.sheet{border:0}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Redline <b>Tactix</b> Pricer</h1>
+  <div class="seg" title="Commercial is the default. Federal adds CLIN/WBS/BOE/FCCOM structure on top of the same numbers.">
+    <button data-mode="commercial">Commercial</button><button data-mode="federal">Federal</button>
+  </div>
+  <span class="sp"></span>
+  <button class="btn" id="bSample">Load sample</button>
+  <button class="btn" id="bNew">New</button>
+  <button class="btn" id="bExp">Export JSON</button>
+  <label class="btn">Import JSON<input type="file" id="bImp" accept=".json" hidden></label>
+</header>
+<div class="kpis" id="kpis"></div>
+<nav id="nav"></nav>
+<main id="view"></main>
+
+<script type="module">
+import * as E from "/engine.js";
+const KEY = "rtx-pricer-v1";
+let P, tab = "scope";
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const money = (n) => (n < 0 ? "-" : "") + "$" + Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
+const money2 = (n) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pct = (n) => (isFinite(n) ? n.toFixed(1) : "0.0") + "%";
+const fed = () => P.mode === "federal";
+const itemWord = () => (fed() ? "CLIN" : "Quote item");
+
+function load() {
+  try { P = JSON.parse(localStorage.getItem(KEY)); } catch { P = null; }
+  if (!P) P = E.sampleProposal();
+  normalize();
+}
+function normalize() {
+  const d = E.newProposal(P.mode);
+  P = { ...d, ...P, rates: { ...d.rates, ...P.rates }, escalation: { ...d.escalation, ...P.escalation }, adjust: { ...d.adjust, ...P.adjust }, whatIf: { ...d.whatIf, ...P.whatIf } };
+  if (!P.periods.length) P.periods = [{ name: "Year 1" }];
+  if (!P.groups.length) P.groups = d.groups;
+  P.lines.forEach((l) => { while (l.qty.length < P.periods.length) l.qty.push(0); l.qty.length = P.periods.length; });
+}
+const save = () => localStorage.setItem(KEY, JSON.stringify(P));
+
+// ---------- chrome ----------
+const TABS = () => [["scope", "1 · Scope"], ["costs", "2 · Costs"], ["rates", "3 · Rates & years"], ["tune", "4 · Tune & what-if"], ["internal", "Internal view"], ["quote", "Quote / submission view"], ["checks", "Checks"]];
+function chrome() {
+  document.body.classList.toggle("isfed", fed());
+  document.body.classList.toggle("quoteview", tab === "quote");
+  document.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === P.mode));
+  $("#nav").innerHTML = TABS().map(([k, t]) => `<button data-tab="${k}" class="${k === tab ? "on" : ""}">${t}</button>`).join("");
+  kpis();
+}
+function kpis() {
+  const t = E.compute(P).total;
+  const k = (l, v, c = "") => `<div class="kpi"><small>${l}</small><b class="${c}">${v}</b></div>`;
+  $("#kpis").innerHTML = k("Total price", money(t.price)) + k("Total cost", money(t.cost)) + k("Profit", money(t.profit), t.profit < 0 ? "neg" : "pos") + k("Margin (profit ÷ price)", pct(t.margin), t.margin < 0 ? "neg" : "") + k("ROI (profit ÷ cost)", pct(t.roi), t.roi < 0 ? "neg" : "");
+}
+function render() { chrome(); $("#view").innerHTML = VIEWS[tab](); after[tab]?.(); }
+const after = {};
+
+// ---------- views ----------
+const groupOpts = (sel) => P.groups.map((g) => `<option value="${esc(g.id)}" ${g.id === sel ? "selected" : ""}>${esc(g.id)} · ${esc(g.title)}</option>`).join("");
+const VIEWS = {
+  scope() {
+    return `
+    <div class="card"><h2>Proposal</h2><div class="grid">
+      <label class="f">Proposal name<input data-p="name" value="${esc(P.name)}"></label>
+      <label class="f">Customer<input data-p="customer" value="${esc(P.customer)}"></label></div>
+      <p class="note">${fed() ? "Federal mode: CLINs, sub-CLINs, WBS, BOE, FCCOM and unallowable flags are on. Your commercial lines carry over untouched." : "Commercial mode: just quote items and cost lines. Switch to Federal any time to add CLIN/WBS/BOE/FCCOM structure to this same proposal."}</p></div>
+    <div class="card"><h2>${fed() ? "Statement of work (PWS / SOW / SOO)" : "Scope of work (optional)"}</h2>
+      <textarea id="pws" placeholder="Paste scope text with numbered headings (1. Program Management, 1.1 Reporting…). &quot;Shall&quot; statements are counted per section.">${esc(P.pws)}</textarea>
+      <p><button class="btn pri" id="bParse">Structure proposal from scope</button>
+      <label class="btn">Upload .txt/.md<input type="file" id="bPws" accept=".txt,.md,text/plain" hidden></label>
+      <span class="note">Text files only; for PDF/Word paste the text. Creates ${fed() ? "CLINs, sub-CLINs and WBS elements" : "quote items"}; existing cost lines are untouched.</span></p>
+      <div id="parsed"></div></div>
+    <div class="card"><h2>${fed() ? "CLINs and sub-CLINs" : "Quote items"}</h2>
+      <table><tr><th>ID</th><th>Title</th><th class="fed">Parent CLIN</th><th class="fed n">Fee % override</th><th></th></tr>
+      ${P.groups.map((g, i) => `<tr><td><input class="s" data-g="${i}" data-f="id" value="${esc(g.id)}"></td>
+        <td><input class="l" data-g="${i}" data-f="title" value="${esc(g.title)}"></td>
+        <td class="fed"><select data-g="${i}" data-f="parent"><option value="">— top level —</option>${P.groups.filter((x) => x !== g).map((x) => `<option value="${esc(x.id)}" ${x.id === g.parent ? "selected" : ""}>${esc(x.id)}</option>`).join("")}</select></td>
+        <td class="fed n"><input class="s" type="number" step="0.1" placeholder="default" data-g="${i}" data-f="fee" value="${g.fee ?? ""}"></td>
+        <td><button class="btn x" data-delg="${i}">✕</button></td></tr>`).join("")}</table>
+      <p><button class="btn" id="bAddG">+ Add ${itemWord().toLowerCase()}</button></p></div>
+    <div class="card fed"><h2>WBS elements</h2>
+      <table><tr><th>ID</th><th>Title</th><th class="n">Shall statements</th><th></th></tr>
+      ${P.wbs.map((w, i) => `<tr><td><input class="s" data-w="${i}" data-f="id" value="${esc(w.id)}"></td><td><input class="l" data-w="${i}" data-f="title" value="${esc(w.title)}"></td><td class="n">${w.shalls ?? ""}</td><td><button class="btn x" data-delw="${i}">✕</button></td></tr>`).join("")}</table>
+      <p><button class="btn" id="bAddW">+ Add WBS element</button></p></div>`;
+  },
+  costs() {
+    const c = E.compute(P);
+    const head = `<tr><th>Type</th><th>Description</th><th>Category</th><th class="n">Rate</th>${P.periods.map((p) => `<th class="n">${esc(p.name)} qty</th>`).join("")}<th>${itemWord()}</th><th class="fed">WBS</th><th class="fed">Unallow.</th><th class="fed">Basis of estimate</th><th class="n">Price</th><th></th></tr>`;
+    const rows = P.lines.map((l) => `<tr>
+      <td><select data-l="${l.id}" data-f="type">${[["labor", "Labor"], ["material", "Material"], ["odc", "ODC / other"], ["sub", "Subcontract"]].map(([v, t]) => `<option value="${v}" ${l.type === v ? "selected" : ""}>${t}</option>`).join("")}</select></td>
+      <td><input class="m" data-l="${l.id}" data-f="desc" value="${esc(l.desc)}"></td>
+      <td><input class="s" data-l="${l.id}" data-f="category" value="${esc(l.category)}" placeholder="${l.type === "labor" ? "labor cat." : ""}"></td>
+      <td class="n"><input class="s" type="number" step="any" data-l="${l.id}" data-f="rate" value="${l.rate}" title="${l.type === "labor" ? "base hourly rate (unburdened)" : "unit cost"}"></td>
+      ${l.qty.map((q, i) => `<td class="n"><input class="s" type="number" step="any" data-l="${l.id}" data-q="${i}" value="${q}"></td>`).join("")}
+      <td><select data-l="${l.id}" data-f="group">${groupOpts(l.group)}</select></td>
+      <td class="fed"><select data-l="${l.id}" data-f="wbs"><option value="">—</option>${P.wbs.map((w) => `<option value="${esc(w.id)}" ${w.id === l.wbs ? "selected" : ""}>${esc(w.id)}</option>`).join("")}</select></td>
+      <td class="fed"><input type="checkbox" data-l="${l.id}" data-f="unallowable" ${l.unallowable ? "checked" : ""}></td>
+      <td class="fed"><input class="m" data-l="${l.id}" data-f="boe" value="${esc(l.boe)}" placeholder="how was this estimated?"></td>
+      <td class="n" id="lt-${l.id}">${money(c.lines[l.id].reduce((a, o) => a + o.price, 0))}</td>
+      <td><button class="btn x" data-dell="${l.id}">✕</button></td></tr>`).join("");
+    return `<div class="card"><h2>Cost lines</h2>
+      <p class="note">Labor: hours × base hourly rate. Others: quantity × unit cost. Fringe, overhead, G&A${fed() ? ", FCCOM" : ""} and profit are added from the Rates tab — enter direct costs only.</p>
+      <table>${head}${rows}</table>
+      <p><button class="btn pri" id="bAddL">+ Add cost line</button></p></div>`;
+  },
+  rates() {
+    const R = (k, l, tip = "") => `<label class="f" title="${tip}">${l}<input type="number" step="0.01" data-p="rates.${k}" value="${P.rates[k]}"></label>`;
+    return `<div class="card"><h2>Indirect rates & profit (%)</h2><div class="grid">
+      ${R("fringe", "Fringe on labor")}${R("oh", "Overhead on labor + fringe")}${R("matHandling", "Material handling on material")}${R("ga", "G&A on total cost input")}
+      <div class="fed">${R("fccom", "FCCOM % of direct labor", "Imputed cost of capital; kept out of G&A and profit bases")}</div>
+      ${R("fee", "Profit / fee on total cost")}
+      <label class="f">G&A applies to subcontracts<select data-p="rates.gaOnSub" data-bool="1"><option value="true" ${P.rates.gaOnSub ? "selected" : ""}>Yes</option><option value="false" ${!P.rates.gaOnSub ? "selected" : ""}>No</option></select></label></div>
+      <p class="note">One rate set applies to every period and ${itemWord().toLowerCase()}. Rates should match your actual accounting practice.</p></div>
+    <div class="card"><h2>Periods & escalation</h2>
+      <table><tr><th>Period name</th><th></th></tr>${P.periods.map((p, i) => `<tr><td><input class="m" data-per="${i}" value="${esc(p.name)}"></td><td>${P.periods.length > 1 ? `<button class="btn x" data-delper="${i}">✕</button>` : ""}</td></tr>`).join("")}</table>
+      <p><button class="btn" id="bAddPer">+ Add period / option year</button></p>
+      <div class="grid">${["labor", "material", "odc", "sub"].map((t) => `<label class="f">${{ labor: "Labor", material: "Material", odc: "ODC", sub: "Subcontract" }[t]} escalation %/yr<input type="number" step="0.1" data-p="escalation.${t}" value="${P.escalation[t]}"></label>`).join("")}</div>
+      <p class="note">Escalation compounds from the second period onward.</p></div>`;
+  },
+  tune() {
+    const S = (path, label, min, max, step, val) => `<div class="sl"><span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}" data-p="${path}" value="${val}"><span class="u"><input type="number" min="${min}" max="${max}" step="${step}" data-p="${path}" value="${val}" aria-label="${label} value">%</span></div>`;
+    return `<div class="card"><h2>Price-to-win levers</h2>
+      <p class="note">Move a slider and everything updates immediately. Direct-cost change applies to all lines.</p>
+      ${S("rates.fee", "Profit / fee", -5, 40, 0.5, P.rates.fee)}${S("rates.ga", "G&A", 0, 40, 0.5, P.rates.ga)}${S("rates.oh", "Overhead", 0, 150, 1, P.rates.oh)}${S("adjust.direct", "Direct cost change", -30, 30, 0.5, P.adjust.direct)}</div>
+    <div class="card"><h2>What if delivery slips (or lands early)?</h2>
+      ${S("whatIf.variance", "Delivery variance", -30, 50, 1, P.whatIf.variance)}
+      <div class="grid"><label class="f">Labor elasticity<input type="number" step="0.05" data-p="whatIf.laborElasticity" value="${P.whatIf.laborElasticity}"></label>
+      <label class="f">Other-cost elasticity<input type="number" step="0.05" data-p="whatIf.otherElasticity" value="${P.whatIf.otherElasticity}"></label></div>
+      <p class="note">+ = delivery takes longer (effort rises); − = early/efficient. Price is held at the proposed amount (fixed-price exposure). Elasticity = % change in cost per 1% change in delivery time.</p></div>
+    <div id="tuneOut"></div>`;
+  },
+  internal() {
+    const c = E.compute(P), n = P.periods.length;
+    const row = (l, o, cls = "") => `<tr class="${cls}"><td>${l}</td>${o.map((x) => `<td class="n">${x}</td>`).join("")}</tr>`;
+    const cols = [...P.periods.map((p) => p.name), "Total"];
+    const series = (key, fmt = money) => [...c.periods.map((x) => fmt(x[key])), fmt(c.total[key])];
+    const build = `<table><tr><th>Build-up</th>${cols.map((x) => `<th class="n">${esc(x)}</th>`).join("")}</tr>
+      ${row("Direct labor", series("labor"))}${row("Fringe", series("fringe"))}${row("Overhead", series("oh"))}
+      ${row("Material (direct)", [...c.periods.map((x, i) => money(P.lines.filter((l) => l.type === "material").reduce((a, l) => a + c.lines[l.id][i].direct, 0))), money(c.byType.material.direct)])}
+      ${row("Material handling", series("mh"))}
+      ${row("ODCs", [...c.periods.map((x, i) => money(P.lines.filter((l) => l.type === "odc").reduce((a, l) => a + c.lines[l.id][i].direct, 0))), money(c.byType.odc.direct)])}
+      ${row("Subcontracts", [...c.periods.map((x, i) => money(P.lines.filter((l) => l.type === "sub").reduce((a, l) => a + c.lines[l.id][i].direct, 0))), money(c.byType.sub.direct)])}
+      ${row("G&A", series("ga"))}${fed() ? row("FCCOM", series("fccom")) : ""}
+      ${row("<b>Total cost</b>", series("cost"), "tot")}${row("Profit / fee", series("fee"))}${row("<b>Price</b>", series("price"), "tot")}
+      ${row("Margin (profit ÷ price)", [...c.periods.map((x) => pct(x.margin)), pct(c.total.margin)])}${row("ROI (profit ÷ cost)", [...c.periods.map((x) => pct(x.roi)), pct(c.total.roi)])}</table>`;
+    const grp = `<table><tr><th>${itemWord()}</th><th class="n">Direct</th><th class="n">Indirect+FCCOM</th><th class="n">Cost</th><th class="n">Profit</th><th class="n">Price</th><th class="n">Margin</th><th class="n">ROI</th></tr>
+      ${P.groups.map((g) => { const t = c.rolled[g.id].total; const sub = fed() && g.parent; return `<tr class="${sub ? "sub" : ""}"><td>${esc(g.id)} · ${esc(g.title)}</td><td class="n">${money(t.direct)}</td><td class="n">${money(t.cost - t.direct)}</td><td class="n">${money(t.cost)}</td><td class="n">${money(t.profit)}</td><td class="n">${money(t.price)}</td><td class="n">${pct(t.margin)}</td><td class="n">${pct(t.roi)}</td></tr>`; }).join("")}</table>
+      ${fed() ? `<p class="note">Parent CLIN rows include their sub-CLINs.</p>` : ""}`;
+    const wbs = fed() ? `<div class="card"><h2>WBS roll-up</h2><table><tr><th>WBS</th><th class="n">Direct</th><th class="n">Cost</th><th class="n">Price</th></tr>${Object.entries(c.byWbs).map(([k, t]) => `<tr><td>${esc(k)} ${esc(P.wbs.find((w) => w.id === k)?.title || "")}</td><td class="n">${money(t.direct)}</td><td class="n">${money(t.cost)}</td><td class="n">${money(t.price)}</td></tr>`).join("")}</table></div>` : "";
+    const lines = `<table><tr><th>${itemWord()}</th><th>Line</th><th>Period</th><th class="n">Qty × rate</th><th class="n">Direct</th><th class="n">Fringe</th><th class="n">OH/MH</th><th class="n">G&A</th>${fed() ? "<th class='n'>FCCOM</th>" : ""}<th class="n">Fee</th><th class="n">Price</th>${fed() ? "<th>BOE</th>" : ""}</tr>
+      ${P.lines.flatMap((l) => l.qty.map((q, i) => { const o = c.lines[l.id][i]; return `<tr><td>${esc(l.group)}</td><td>${esc(l.desc)} <span class="note">${esc(l.category)}</span>${o.excluded ? " <b class='neg'>(unallowable – excluded)</b>" : ""}</td><td>${esc(P.periods[i].name)}</td><td class="n">${q} × ${l.rate}</td><td class="n">${money2(o.direct)}</td><td class="n">${money2(o.fringe)}</td><td class="n">${money2(o.oh + o.mh)}</td><td class="n">${money2(o.ga)}</td>${fed() ? `<td class="n">${money2(o.fccom)}</td>` : ""}<td class="n">${money2(o.fee)}</td><td class="n">${money2(o.price)}</td>${fed() ? `<td>${esc(l.boe)}</td>` : ""}</tr>`; })).join("")}</table>`;
+    return `<div class="sheet"><h2>${esc(P.name)} — INTERNAL / PROPRIETARY</h2><p class="note">Contains cost, rates and margin. Do not release to the customer.</p>
+      <h3>Price build-up</h3>${build}<h3>By ${itemWord().toLowerCase()}</h3>${grp}</div>${wbs}
+      <div class="card"><h2>Line detail</h2>${lines}</div>
+      <p class="noprint"><button class="btn" onclick="print()">Print</button> <button class="btn" id="bCsvI">Download CSV</button></p>`;
+  },
+  quote() {
+    const s = E.sanitized(P);
+    return `<div class="sheet"><h2>${esc(s.name)}</h2>${s.customer ? `<p>Prepared for ${esc(s.customer)}</p>` : ""}
+      <table><tr><th>${fed() ? "CLIN" : "Item"}</th><th>Description</th>${s.periods.map((x) => `<th class="n">${esc(x)}</th>`).join("")}${s.periods.length > 1 ? '<th class="n">Total</th>' : ""}</tr>
+      ${s.rows.map((r) => `<tr class="${r.level ? "sub" : ""}"><td>${esc(r.id)}</td><td>${esc(r.title)}</td>${r.periods.map((x) => `<td class="n">${money(x)}</td>`).join("")}${s.periods.length > 1 ? `<td class="n">${money(r.total)}</td>` : ""}</tr>`).join("")}
+      <tr class="tot"><td></td><td>Total price</td>${s.periodTotals.map((x) => `<td class="n">${money(x)}</td>`).join("")}${s.periods.length > 1 ? `<td class="n">${money(s.total)}</td>` : ""}</tr></table></div>
+      <p class="note noprint">${fed() ? "Sub-CLIN rows are shown indented; parent CLIN rows include them. " : ""}This view contains pricing only — no rates, cost build-up, margin or basis of estimate.</p>
+      <p class="noprint"><button class="btn" onclick="print()">Print</button> <button class="btn" id="bCsvQ">Download CSV</button></p>`;
+  },
+  checks() {
+    return `<div class="card"><h2>Compliance checks</h2>${E.compliance(P).map((c) => `<div class="chk ${c.level}">${c.level === "warn" ? "⚠ " : "ℹ "}${esc(c.text)}</div>`).join("")}</div>`;
+  },
+};
+after.scope = () => { };
+after.tune = () => tuneOut();
+function tuneOut() {
+  const el = $("#tuneOut"); if (!el) return;
+  const base = E.compute(P).total, w = E.whatIf(P, +P.whatIf.variance);
+  const cls = (v) => (v < 0 ? "neg" : "pos");
+  el.innerHTML = `<div class="card"><h2>Effect</h2><table><tr><th></th><th class="n">Proposed</th><th class="n">With ${P.whatIf.variance}% delivery variance</th></tr>
+    <tr><td>Price</td><td class="n">${money(base.price)}</td><td class="n">${money(w.price)}</td></tr>
+    <tr><td>Cost</td><td class="n">${money(base.cost)}</td><td class="n">${money(w.cost)} <span class="${w.costDelta > 0 ? "neg" : "pos"}">(${w.costDelta >= 0 ? "+" : ""}${money(w.costDelta)})</span></td></tr>
+    <tr><td>Profit</td><td class="n">${money(base.profit)}</td><td class="n ${cls(w.profit)}">${money(w.profit)}</td></tr>
+    <tr><td>Margin</td><td class="n">${pct(base.margin)}</td><td class="n ${cls(w.margin)}">${pct(w.margin)}</td></tr>
+    <tr><td>ROI</td><td class="n">${pct(base.roi)}</td><td class="n ${cls(w.roi)}">${pct(w.roi)}</td></tr></table></div>`;
+}
+
+// ---------- events ----------
+const setPath = (path, v) => { const k = path.split("."); let o = P; while (k.length > 1) o = o[k.shift()]; o[k[0]] = v; };
+const download = (name, text, type) => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); };
+const slug = () => P.name.replace(/\W+/g, "_").slice(0, 40) || "proposal";
+
+document.addEventListener("input", (e) => {
+  const t = e.target; if (!(t instanceof HTMLElement)) return;
+  const d = t.dataset;
+  if (d.p) {
+    setPath(d.p, d.bool ? t.value === "true" : t.type === "number" || t.type === "range" ? +t.value : t.value);
+    if (t.type === "range" || t.type === "number") document.querySelectorAll(".sl [data-p]").forEach((o) => { if (o !== t && o.dataset.p === d.p) o.value = t.value; });
+  }
+  else if (d.l) { const l = P.lines.find((x) => x.id === d.l); if (d.q !== undefined) l.qty[+d.q] = +t.value; else l[d.f] = t.type === "checkbox" ? t.checked : t.type === "number" ? +t.value : t.value; }
+  else if (d.g !== undefined) { const g = P.groups[+d.g]; if (d.f === "id") { const old = g.id; g.id = t.value; P.lines.forEach((l) => l.group === old && (l.group = t.value)); P.groups.forEach((x) => x.parent === old && (x.parent = t.value)); } else g[d.f] = d.f === "fee" ? (t.value === "" ? null : +t.value) : t.value; }
+  else if (d.w !== undefined) { const w = P.wbs[+d.w]; const old = w.id; w[d.f] = t.value; if (d.f === "id") P.lines.forEach((l) => l.wbs === old && (l.wbs = t.value)); }
+  else if (d.per !== undefined) P.periods[+d.per].name = t.value;
+  else return;
+  save(); kpis();
+  if (tab === "tune") tuneOut();
+  if (tab === "costs") { const c = E.compute(P); P.lines.forEach((l) => { const el = $("#lt-" + l.id); if (el) el.textContent = money(c.lines[l.id].reduce((a, o) => a + o.price, 0)); }); }
+  if (d.l && ["type", "group", "wbs", "unallowable"].includes(d.f) && t.tagName === "SELECT") { /* values already live */ }
+});
+
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("button, label"); if (!t) return;
+  const d = t.dataset;
+  if (d.mode) { P.mode = d.mode; save(); render(); return; }
+  if (d.tab) { tab = d.tab; render(); return; }
+  if (d.delg !== undefined) { if (P.groups.length > 1) { const g = P.groups.splice(+d.delg, 1)[0]; P.lines.forEach((l) => l.group === g.id && (l.group = P.groups[0].id)); P.groups.forEach((x) => x.parent === g.id && (x.parent = "")); } }
+  else if (d.delw !== undefined) { const w = P.wbs.splice(+d.delw, 1)[0]; P.lines.forEach((l) => l.wbs === w.id && (l.wbs = "")); }
+  else if (d.dell) P.lines = P.lines.filter((l) => l.id !== d.dell);
+  else if (d.delper !== undefined) { P.periods.splice(+d.delper, 1); P.lines.forEach((l) => l.qty.splice(+d.delper, 1)); }
+  else return act(t.id);
+  save(); render();
+});
+function hasContent() {
+  if (!P.lines.length && !P.wbs.length && P.groups.every((g) => g.title === "Quote item 1" && !g.parent && g.fee == null)) return false;
+  try { const a = JSON.parse(JSON.stringify(P)), b = E.sampleProposal(); return JSON.stringify(a) !== JSON.stringify(b); } catch { return true; }
+}
+function act(id) {
+  if (id === "bAddL") { const prev = P.lines[P.lines.length - 1]; P.lines.push(E.newLine(P, { group: prev?.group || P.groups[0].id })); }
+  else if (id === "bAddG") { let n = P.groups.length + 1; while (P.groups.some((g) => g.id === String(n))) n++; P.groups.push({ id: String(n), title: itemWord() + " " + n, parent: "", fee: null }); }
+  else if (id === "bAddW") P.wbs.push({ id: "W" + (P.wbs.length + 1), title: "", shalls: "" });
+  else if (id === "bAddPer") { P.periods.push({ name: P.periods.length === 1 ? "Option 1" : "Option " + P.periods.length }); P.lines.forEach((l) => l.qty.push(l.qty[l.qty.length - 1] || 0)); }
+  else if (id === "bParse") {
+    P.pws = $("#pws").value; const secs = E.parseScope(P.pws);
+    if (!secs.length) { $("#parsed").innerHTML = `<p class="note">No numbered headings found (e.g. "1. Title", "1.1 Title").</p>`; save(); return; }
+    E.applyScope(P, secs); save(); tab = "scope"; render();
+    $("#parsed").innerHTML = `<p class="note">Imported ${secs.length} sections (${secs.reduce((a, s) => a + s.shalls, 0)} "shall" statements).</p>`; return;
+  }
+  else if (id === "bSample") { if (hasContent() && !confirm("Replace the current proposal with the sample?")) return; P = E.sampleProposal(); tab = "scope"; }
+  else if (id === "bNew") { if (!confirm("Start a new, empty proposal? The current one will be replaced.")) return; P = E.newProposal("commercial"); P.lines.push(E.newLine(P)); tab = "scope"; }
+  else if (id === "bExp") return download(slug() + ".json", JSON.stringify(P, null, 1), "application/json");
+  else if (id === "bCsvI") return download(slug() + "_internal.csv", E.internalCsv(P), "text/csv");
+  else if (id === "bCsvQ") return download(slug() + "_quote.csv", E.sanitizedCsv(P), "text/csv");
+  else return;
+  save(); render();
+}
+document.addEventListener("change", (e) => {
+  const t = e.target;
+  const f = t.files?.[0]; if (!f) return;
+  const rd = new FileReader();
+  if (t.id === "bImp") rd.onload = () => { try { P = JSON.parse(rd.result); normalize(); save(); render(); } catch { alert("Not a valid proposal file."); } };
+  else if (t.id === "bPws") rd.onload = () => { P.pws = String(rd.result); save(); render(); };
+  else return;
+  rd.readAsText(f);
+});
+// text edits in the scope textarea persist without re-render
+document.addEventListener("blur", (e) => { if (e.target.id === "pws") { P.pws = e.target.value; save(); } }, true);
+
+load(); render();
+</script>
+</body>
+</html>

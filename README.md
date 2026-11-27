@@ -42,3 +42,17 @@ Open an issue in the repo describing what the pricer should do — what it
 prices, what inputs it takes, what the output looks like — tag `@claude`,
 and it will propose the change as a pull request. Review, merge, and
 Cloudflare deploys it.
+
+## The pricer
+
+Single-page app (`src/index.html`) on a shared cost engine (`src/engine.client.js`,
+tested with `npm test`). **Commercial mode is the default**: quote items, labor /
+material / ODC / subcontract lines, fringe, overhead, G&A, profit, multiyear
+escalation, what-if, and an internal vs. customer-facing quote view. **Federal mode**
+is an optional layer on the same data: CLINs/sub-CLINs, WBS, BOE, FCCOM, unallowable
+flags and PWS/SOW/SOO structuring. Data is stored in the browser (localStorage) with
+JSON export/import. `/api/hello` is unchanged.
+
+Originality: the screens, flow and report layouts were designed from first principles
+using generic industry terms (CLIN, WBS, BOE, OH, G&A, FCCOM). It is not a copy of any
+commercial pricing product.
