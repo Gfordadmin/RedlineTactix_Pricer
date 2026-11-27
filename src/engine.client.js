@@ -194,8 +194,10 @@ export function parseScope(text) {
 export function applyScope(p, secs) {
   if (!secs.length) return 0;
   const fed = p.mode === "federal";
-  const unused = p.groups.length === 1 && p.groups[0].title === "Quote item 1" && !p.lines.length;
-  if (unused) p.groups = [];
+  // Re-import replaces its own output: drop groups/WBS with no cost lines, never costed ones.
+  p.groups = p.groups.filter((g) => p.lines.some((l) => l.group === g.id));
+  p.wbs = p.wbs.filter((w) => p.lines.some((l) => l.wbs === w.id));
+  p.groups.forEach((g) => { if (g.parent && !p.groups.some((x) => x.id === g.parent)) g.parent = ""; });
   for (const s of secs) {
     const id = s.num;
     if (!p.groups.some((g) => g.id === id) && (s.level === 1 || (fed && s.level === 2))) {

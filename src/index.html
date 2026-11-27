@@ -40,6 +40,8 @@ textarea{width:100%;min-height:150px}
 label.f{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--mut)}
 .sl{display:grid;grid-template-columns:150px 1fr 70px;gap:10px;align-items:center;margin:6px 0}
 .sl input[type=range]{padding:0}
+.sl input[type=number]{width:70px}.sl .u{display:flex;align-items:center;gap:4px}
+.quoteview header,.quoteview .kpis{display:none!important}
 .pos{color:var(--ok)}.neg{color:var(--red)}
 .tot td{font-weight:700;border-top:2px solid var(--ink)}
 .sub td:first-child{padding-left:26px}
@@ -97,6 +99,7 @@ const save = () => localStorage.setItem(KEY, JSON.stringify(P));
 const TABS = () => [["scope", "1 · Scope"], ["costs", "2 · Costs"], ["rates", "3 · Rates & years"], ["tune", "4 · Tune & what-if"], ["internal", "Internal view"], ["quote", "Quote / submission view"], ["checks", "Checks"]];
 function chrome() {
   document.body.classList.toggle("isfed", fed());
+  document.body.classList.toggle("quoteview", tab === "quote");
   document.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === P.mode));
   $("#nav").innerHTML = TABS().map(([k, t]) => `<button data-tab="${k}" class="${k === tab ? "on" : ""}">${t}</button>`).join("");
   kpis();
@@ -172,7 +175,7 @@ const VIEWS = {
       <p class="note">Escalation compounds from the second period onward.</p></div>`;
   },
   tune() {
-    const S = (path, label, min, max, step, val) => `<div class="sl"><span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}" data-p="${path}" value="${val}"><b id="v-${path.replace(".", "-")}">${val}%</b></div>`;
+    const S = (path, label, min, max, step, val) => `<div class="sl"><span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}" data-p="${path}" value="${val}"><span class="u"><input type="number" min="${min}" max="${max}" step="${step}" data-p="${path}" value="${val}" aria-label="${label} value">%</span></div>`;
     return `<div class="card"><h2>Price-to-win levers</h2>
       <p class="note">Move a slider and everything updates immediately. Direct-cost change applies to all lines.</p>
       ${S("rates.fee", "Profit / fee", -5, 40, 0.5, P.rates.fee)}${S("rates.ga", "G&A", 0, 40, 0.5, P.rates.ga)}${S("rates.oh", "Overhead", 0, 150, 1, P.rates.oh)}${S("adjust.direct", "Direct cost change", -30, 30, 0.5, P.adjust.direct)}</div>
@@ -226,7 +229,6 @@ after.tune = () => tuneOut();
 function tuneOut() {
   const el = $("#tuneOut"); if (!el) return;
   const base = E.compute(P).total, w = E.whatIf(P, +P.whatIf.variance);
-  document.querySelectorAll('[id^="v-"]').forEach((e) => { const [a, b] = e.id.slice(2).split("-"); e.textContent = P[a][b] + "%"; });
   const cls = (v) => (v < 0 ? "neg" : "pos");
   el.innerHTML = `<div class="card"><h2>Effect</h2><table><tr><th></th><th class="n">Proposed</th><th class="n">With ${P.whatIf.variance}% delivery variance</th></tr>
     <tr><td>Price</td><td class="n">${money(base.price)}</td><td class="n">${money(w.price)}</td></tr>
@@ -244,7 +246,10 @@ const slug = () => P.name.replace(/\W+/g, "_").slice(0, 40) || "proposal";
 document.addEventListener("input", (e) => {
   const t = e.target; if (!(t instanceof HTMLElement)) return;
   const d = t.dataset;
-  if (d.p) setPath(d.p, d.bool ? t.value === "true" : t.type === "number" || t.type === "range" ? +t.value : t.value);
+  if (d.p) {
+    setPath(d.p, d.bool ? t.value === "true" : t.type === "number" || t.type === "range" ? +t.value : t.value);
+    if (t.type === "range" || t.type === "number") document.querySelectorAll(".sl [data-p]").forEach((o) => { if (o !== t && o.dataset.p === d.p) o.value = t.value; });
+  }
   else if (d.l) { const l = P.lines.find((x) => x.id === d.l); if (d.q !== undefined) l.qty[+d.q] = +t.value; else l[d.f] = t.type === "checkbox" ? t.checked : t.type === "number" ? +t.value : t.value; }
   else if (d.g !== undefined) { const g = P.groups[+d.g]; if (d.f === "id") { const old = g.id; g.id = t.value; P.lines.forEach((l) => l.group === old && (l.group = t.value)); P.groups.forEach((x) => x.parent === old && (x.parent = t.value)); } else g[d.f] = d.f === "fee" ? (t.value === "" ? null : +t.value) : t.value; }
   else if (d.w !== undefined) { const w = P.wbs[+d.w]; const old = w.id; w[d.f] = t.value; if (d.f === "id") P.lines.forEach((l) => l.wbs === old && (l.wbs = t.value)); }
@@ -268,6 +273,10 @@ document.addEventListener("click", (e) => {
   else return act(t.id);
   save(); render();
 });
+function hasContent() {
+  if (!P.lines.length && !P.wbs.length && P.groups.every((g) => g.title === "Quote item 1" && !g.parent && g.fee == null)) return false;
+  try { const a = JSON.parse(JSON.stringify(P)), b = E.sampleProposal(); return JSON.stringify(a) !== JSON.stringify(b); } catch { return true; }
+}
 function act(id) {
   if (id === "bAddL") { const prev = P.lines[P.lines.length - 1]; P.lines.push(E.newLine(P, { group: prev?.group || P.groups[0].id })); }
   else if (id === "bAddG") { let n = P.groups.length + 1; while (P.groups.some((g) => g.id === String(n))) n++; P.groups.push({ id: String(n), title: itemWord() + " " + n, parent: "", fee: null }); }
@@ -279,7 +288,7 @@ function act(id) {
     E.applyScope(P, secs); save(); tab = "scope"; render();
     $("#parsed").innerHTML = `<p class="note">Imported ${secs.length} sections (${secs.reduce((a, s) => a + s.shalls, 0)} "shall" statements).</p>`; return;
   }
-  else if (id === "bSample") { if (!confirm("Replace the current proposal with the sample?")) return; P = E.sampleProposal(); tab = "scope"; }
+  else if (id === "bSample") { if (hasContent() && !confirm("Replace the current proposal with the sample?")) return; P = E.sampleProposal(); tab = "scope"; }
   else if (id === "bNew") { if (!confirm("Start a new, empty proposal? The current one will be replaced.")) return; P = E.newProposal("commercial"); P.lines.push(E.newLine(P)); tab = "scope"; }
   else if (id === "bExp") return download(slug() + ".json", JSON.stringify(P, null, 1), "application/json");
   else if (id === "bCsvI") return download(slug() + "_internal.csv", E.internalCsv(P), "text/csv");

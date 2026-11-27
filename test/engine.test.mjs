@@ -64,3 +64,13 @@ test("sub-CLIN rolls into parent in federal", () => {
   const c = compute(p);
   assert.equal(c.rolled["1"].total.price, 100);
 });
+test("re-import replaces stale uncosted entries but keeps costed ones", () => {
+  const p = newProposal("federal");
+  applyScope(p, parseScope("1. Merged Everything 2 Engineering"));
+  p.groups.push({ id: "9", title: "Costed", parent: "", fee: null }); p.wbs.push({ id: "9", title: "Costed", shalls: 0 });
+  p.lines.push(newLine(p, { group: "9", wbs: "9" }));
+  applyScope(p, parseScope("1. Program Management\n2. Engineering"));
+  assert.deepEqual(p.groups.map((g) => g.id).sort(), ["1", "2", "9"]);
+  assert.equal(p.groups.find((g) => g.id === "1").title, "Program Management");
+  assert.ok(p.wbs.some((w) => w.id === "9"));
+});
