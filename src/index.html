@@ -275,7 +275,9 @@ document.addEventListener("click", (e) => {
 });
 function hasContent() {
   if (!P.lines.length && !P.wbs.length && P.groups.every((g) => g.title === "Quote item 1" && !g.parent && g.fee == null)) return false;
-  try { const a = JSON.parse(JSON.stringify(P)), b = E.sampleProposal(); return JSON.stringify(a) !== JSON.stringify(b); } catch { return true; }
+  // Line ids are random per newLine(), so compare with line ids stripped.
+  const strip = (p) => JSON.stringify({ ...p, lines: (p.lines || []).map(({ id, ...rest }) => rest) });
+  try { return strip(JSON.parse(JSON.stringify(P))) !== strip(E.sampleProposal()); } catch { return true; }
 }
 function act(id) {
   if (id === "bAddL") { const prev = P.lines[P.lines.length - 1]; P.lines.push(E.newLine(P, { group: prev?.group || P.groups[0].id })); }
